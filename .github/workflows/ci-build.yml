@@ -1,152 +1,241 @@
-name: "Flujo CI-Build"
-run-name: "Flujo CI - Build"
+name: "Flujo CI-Test"
+run-name: "Flujo CI - Test"
 on:
-  workflow_dispatch:
-    inputs:
-      cloud:
-        description: "Proveedor Cloud"
-        required: true
-        default: "AWS"
-        options: ["AWS", "GCP", "Azure"]
-  issue_comment:
-    types: [created]
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+env:
+  ANGULAR_CLI_VERSION: 13
 jobs:
-  docker-aws:
-    if: |
-      (github.event.issue.pull_request && contains(github.event.comment.body, 'Build-AWS')) ||
-      github.event.inputs.cloud == 'AWS'
+  lint:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout repositorio"
         uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f #v3: v3.4.0
-      - name: "Configurar QEMU"
-        uses: docker/setup-qemu-action@e81a89b1732b9c48d79cd809d8d81d79c4647a18 #v2: v2.1.0
-      - name: "Configurar Docker Buildx"
-        uses: docker/setup-buildx-action@4b4e9c3e2d4531116a6f8ba8e71fc6e2cb6e6c8c #v2: v2.5.0
-      - name: "Configurar tag y etiquetas para ${{ github.ref }}"
+      - name: "Configurar Node 18"
+        uses: actions/setup-node@64ed1c7eab4cce3362f8c340dee64e5eaeef8f7c #v3: v3.6.0
+        with:
+          node-version: 18
+      - name: "Instalar CLI de Angular"
+        run: npm install -g @angular/cli@$ANGULAR_CLI_VERSION
+      - name: "Instalar dependencias"
         run: |
-          if [ "$GITHUB_REF" == "refs/heads/master" ]; then
-          echo "DOCKER_TAG=latest" >> $GITHUB_ENV
-          else
-          echo "DOCKER_TAG=snapshot" >> $GITHUB_ENV
-          fi
-          echo "VCS_REF=`git rev-parse --short HEAD`" >> $GITHUB_ENV
-          echo "BUILD_DATE=`date -u +”%Y-%m-%dT%H:%M:%SZ”`" >> $GITHUB_ENV
-      - name: "Configurar credenciales de AWS"
-        uses: aws-actions/configure-aws-credentials@e1e17a757e536f70e52b5a12b2e8d1d1c60e04ef #v2 #v2.0.0
+          npm install --ignore-scripts
+          cd frontend
+          npm install --ignore-scripts --legacy-peer-deps
+      - name: "Lint"
+        run: npm run lint
+      - name: "Lint configuraciones personalizadas"
+        run: >
+          npm run lint:config -- -f ./config/7ms.yml &&
+          npm run lint:config -- -f ./config/addo.yml &&
+          npm run lint:config -- -f ./config/bodgeit.yml &&
+          npm run lint:config -- -f ./config/ctf.yml &&
+          npm run lint:config -- -f ./config/default.yml &&
+          npm run lint:config -- -f ./config/fbctf.yml &&
+          npm run lint:config -- -f ./config/juicebox.yml &&
+          npm run lint:config -- -f ./config/mozilla.yml &&
+          npm run lint:config -- -f ./config/oss.yml &&
+          npm run lint:config -- -f ./config/quiet.yml &&
+          npm run lint:config -- -f ./config/tutorial.yml &&
+          npm run lint:config -- -f ./config/unsafe.yml
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repositorio"
+        uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f #v3: v3.4.0
+      - name: "Configurar Node 18"
+        uses: actions/setup-node@64ed1c7eab4cce3362f8c340dee64e5eaeef8f7c #v3: v3.6.0
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_REGION }}
-      - name: "Autenticar en AWS ECR"
-        id: login-ecr-publico
-        uses: aws-actions/amazon-ecr-login@261a7de32bda11ba01f4d75c4ed6caf3739e54be #v1 #v1.5.3
+          node-version: 18
+      - name: "Instalar CLI de Angular"
+        run: npm install -g @angular/cli@$ANGULAR_CLI_VERSION
+      - name: "Instalar dependencias"
+        run: |
+          npm install
+      - name: "Ejecutar test unitarios"
+        uses: nick-invision/retry@943e742917ac94714d2f408a0e8320f2d1fcafcd #v2: 2.8.3 reintenta comando en caso de falla
         with:
-          registry-type: public
-      - name: "Compilar y Subir imagen de Docker"
+          timeout_minutes: 15
+          max_attempts: 3
+          command: npm test
+      - name: "Copiar información de test coverage pruebas unitarias"
+        run: |
+          cp build/reports/coverage/frontend-tests/lcov.info frontend-lcov.info
+          cp build/reports/coverage/server-tests/lcov.info server-lcov.info
+      - name: "Subir información de test coverage pruebas unitarias"
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce #v3: v3.1.2
+        with:
+          name: unit-test-lcov
+          path: |
+            frontend-lcov.info
+            server-lcov.info
+
+  test-api:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repositorio"
+        uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f #v3: v3.4.0
+      - name: "Configurar Node 18"
+        uses: actions/setup-node@64ed1c7eab4cce3362f8c340dee64e5eaeef8f7c #v3: v3.6.0
+        with:
+          node-version: 18
+      - name: "Instalar CLI de Angular"
+        run: npm install -g @angular/cli@$ANGULAR_CLI_VERSION
+      - name: "Instalar dependencias"
+        run: |
+          npm install
+      - name: "Ejecutar test de integración"
+        uses: nick-invision/retry@943e742917ac94714d2f408a0e8320f2d1fcafcd #v2: 2.8.3 reintenta comando en caso de falla
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          command: |
+            export NODE_ENV=test
+            npm run frisby
+          shell: bash
+      - name: "Copiar información de test coverage pruebas integración"
+        run: cp build/reports/coverage/api-tests/lcov.info api-lcov.info
+      - name: "Subir información de test coverages pruebas integración"
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce #v3: v3.1.2
+        with:
+          name: api-test-lcov
+          path: |
+            api-lcov.info
+
+  reporte-coverage:
+    needs: [test, test-api]
+    runs-on: ubuntu-latest
+    if: github.repository == 'juice-shop/juice-shop' && github.event_name == 'push'
+    steps:
+      - name: "Checkout repositorio"
+        uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f #v3: v3.4.0
+      - name: "Descargar información de test coverage pruebas unitarias"
+        uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a #v3: v3.0.2
+        with:
+          name: unit-test-lcov
+      - name: "Descargar información de test coverage pruebas integración"
+        uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a #v3: v3.0.2
+        with:
+          name: api-test-lcov
+      - name: "Publish coverage to Codeclimate"
         env:
-          REGISTRY: ${{ steps.login-ecr-publico.outputs.registry }}
-        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671 #v4 #v4.0.0
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ vars.AWS_REGISTRY_ALIAS }}/${{ vars.AWS_REPOSITORY }}:${{ env.DOCKER_TAG }}
-          build-args: |
-            VCS_REF=${{ env.VCS_REF }}
-            BUILD_DATE=${{ env.BUILD_DATE }}
-
-  docker-gcp:
-    if: |
-      (github.event.issue.pull_request && contains(github.event.comment.body, 'Build-GCP')) ||
-      github.event.inputs.cloud == 'GCP'
-    runs-on: ubuntu-latest
-    env:
-      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-    steps:
-      - name: "Checkout repositorio"
-        uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f #v3: v3.4.0
-      - name: "Configurar QEMU"
-        uses: docker/setup-qemu-action@e81a89b1732b9c48d79cd809d8d81d79c4647a18 #v2: v2.1.0
-      - name: "Configurar Docker Buildx"
-        uses: docker/setup-buildx-action@4b4e9c3e2d4531116a6f8ba8e71fc6e2cb6e6c8c #v2: v2.5.0
-      - name: "Configurar tag y etiquetas para ${{ github.ref }}"
+          CC_TEST_REPORTER_ID: ${{ secrets.CC_TEST_REPORTER_ID }}
         run: |
-          if [ "$GITHUB_REF" == "refs/heads/master" ]; then
-          echo "DOCKER_TAG=latest" >> $GITHUB_ENV
-          else
-          echo "DOCKER_TAG=snapshot" >> $GITHUB_ENV
-          fi
-          echo "VCS_REF=`git rev-parse --short HEAD`" >> $GITHUB_ENV
-          echo "BUILD_DATE=`date -u +”%Y-%m-%dT%H:%M:%SZ”`" >> $GITHUB_ENV
-      - name: "Autenticar en GCP"
-        id: auth
-        uses: google-github-actions/auth@ef5d53e30bbcd8d0836f4288f5e50ff3e086997d #v1.0.0
-        with:
-          token_format: access_token
-          workload_identity_provider: ${{ env.PROJECT_ID }}
-          service_account: ${{ secrets.GCP_SA_KEY }}
-      - name: "Autenticar en Artifact Registry"
-        uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a #v2 #v2.1.0
-        with:
-          registry: ${{ vars.GCP.REGISTRY}}
-          username: oauth2accesstoken
-          password: ${{ steps.auth.outputs.access_token }}
-      - name: "Compilar y Subir imagen de Docker"
-        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671 #v4 #v4.0.0
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ vars.GCP_REGION }}-${{ vars.GCP.REGISTRY}}/${{ vars.GCP_PROJECT_ID }}/${{ vars.GCP_REPOSITORY_NAME }}/${{ vars.GCP_IMAGE_NAME }}:${{ env.DOCKER_TAG }}
-          build-args: |
-            VCS_REF=${{ env.VCS_REF }}
-            BUILD_DATE=${{ env.BUILD_DATE }}
+          curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
+          chmod +x ./cc-test-reporter
+          sed -i s/SF:/SF:frontend\\//g frontend-lcov.info
+          ./cc-test-reporter format-coverage -t lcov -o codeclimate.frontend.json frontend-lcov.info
+          ./cc-test-reporter format-coverage -t lcov -o codeclimate.server.json server-lcov.info
+          ./cc-test-reporter format-coverage -t lcov -o codeclimate.api.json api-lcov.info
+          ./cc-test-reporter sum-coverage codeclimate.*.json -p 3
+          ./cc-test-reporter upload-coverage
+        shell: bash
 
-  docker-azure:
-    if: |
-      (github.event.issue.pull_request && contains(github.event.comment.body, 'Build-Azure')) ||
-      github.event.inputs.cloud == 'Azure'
+  test-personalizado:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout repositorio"
         uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f #v3: v3.4.0
-      - name: "Configurar QEMU"
-        uses: docker/setup-qemu-action@e81a89b1732b9c48d79cd809d8d81d79c4647a18 #v2: v2.1.0
-      - name: "Configurar Docker Buildx"
-        uses: docker/setup-buildx-action@4b4e9c3e2d4531116a6f8ba8e71fc6e2cb6e6c8c #v2: v2.5.0
-      - name: "Configurar tag y etiquetas para ${{ github.ref }}"
+      - name: "Configurar Node 18"
+        uses: actions/setup-node@64ed1c7eab4cce3362f8c340dee64e5eaeef8f7c #v3: v3.6.0
+        with:
+          node-version: 18
+      - name: "Instalar CLI de Angular"
+        run: npm install -g @angular/cli@$ANGULAR_CLI_VERSION
+      - name: "Instalar aplicación"
+        run: npm install
+      - name: "Ejecutar tests para cada configuración personalizada"
+        uses: nick-invision/retry@943e742917ac94714d2f408a0e8320f2d1fcafcd #v2: 2.8.3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: >
+            NODE_ENV=7ms npm run test:server &&
+            NODE_ENV=addo npm run test:server &&
+            NODE_ENV=bodgeit npm run test:server &&
+            NODE_ENV=ctf npm run test:server &&
+            NODE_ENV=fbctf npm run test:server &&
+            NODE_ENV=juicebox npm run test:server &&
+            NODE_ENV=mozilla npm run test:server &&
+            NODE_ENV=oss npm run test:server &&
+            NODE_ENV=quiet npm run test:server &&
+            NODE_ENV=tutorial npm run test:server &&
+            NODE_ENV=unsafe npm run test:server
+  e2e:
+    if: github.repository == 'juice-shop/juice-shop' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        browser: [chrome, firefox]
+      fail-fast: false
+    steps:
+      - name: "Checkout repositorio"
+        uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f #v3: v3.4.0
+      - name: "Configurar Node 18"
+        uses: actions/setup-node@64ed1c7eab4cce3362f8c340dee64e5eaeef8f7c #v3: v3.6.0
+        with:
+          node-version: 18
+      - name: "Instalar CLI de Angular"
+        run: npm install -g @angular/cli@$ANGULAR_CLI_VERSION
+      - name: "Instalar aplicación"
+        run: npm install
+      - name: "Ejecutar tests end-to-end"
+        uses: cypress-io/github-action@96268482322bc63c76561c602a84be842c527dbc #v5.5.1
+        with:
+          install: false
+          browser: ${{ matrix.browser }}
+          start: npm start
+          wait-on: http://localhost:3000
+          record: true
+          group: ${{ matrix.browser }} @ ${{ matrix.os }}
+        env:
+          SOLUTIONS_WEBHOOK: ${{ secrets.E2E_SOLUTIONS_WEBHOOK }}
+          CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test-humo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repositorio"
+        uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f #v3: v3.4.0
+      - name: "Configurar Node 18"
+        uses: actions/setup-node@64ed1c7eab4cce3362f8c340dee64e5eaeef8f7c #v3: v3.6.0
+        with:
+          node-version: 18
+      - name: "Instalar CLI de Angular"
         run: |
-          if [ "$GITHUB_REF" == "refs/heads/master" ]; then
-          echo "DOCKER_TAG=latest" >> $GITHUB_ENV
-          else
-          echo "DOCKER_TAG=snapshot" >> $GITHUB_ENV
-          fi
-          echo "VCS_REF=`git rev-parse --short HEAD`" >> $GITHUB_ENV
-          echo "BUILD_DATE=`date -u +”%Y-%m-%dT%H:%M:%SZ”`" >> $GITHUB_ENV
-      - name: "Autenticar en Azure"
-        uses: azure/login@92a5484dfaf04ca78a94597f4f19fea633851fa2 #v1 #v1.4.6
-        with:
-          creds: ${{ env.AZURE_CREDENTIALS }}
-      - name: "Autenticar en Azure Container Registry"
-        uses: azure/docker-login@83efeb77770c98b620c73055fbb59b2847e17dc0 #v1 #v1.0.1
-        with:
-          login-server: ${{ vars.AZURE_REGISTRY_NAME }}
-          username: ${{ secrets.AZURE_REGISTRY_USERNAME }}
-          password: ${{ secrets.AZURE_REGISTRY_PASSWORD }}
-      - name: "Compilar y Subir imagen de Docker"
-        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671 #v4 #v4.0.0
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ vars.AZURE_REGISTRY_NAME }}/${{ vars.AZURE_IMAGE_NAME }}:${{ env.DOCKER_TAG }}
-          build-args: |
-            VCS_REF=${{ env.VCS_REF }}
-            BUILD_DATE=${{ env.BUILD_DATE }}
+          npm install -g @angular/cli@$ANGULAR_CLI_VERSION
+          npm install -g grunt-cli
+      - name: "Configurar opciones de empaquetar para Grunt"
+        run: |
+          echo "PCKG_OS_NAME=linux" >> $GITHUB_ENV
+          echo "PCKG_NODE_VERSION=14" >> $GITHUB_ENV
+          echo "PCKG_CPU_ARCH=x64" >> $GITHUB_ENV
+      - name: "Empacar aplicación"
+        run: |
+          npm install --production
+          npm install -g grunt-cli
+          npm run package:ci
+      - name: "Desempacar aplicación"
+        run: |
+          cd dist
+          tar -zxf juice-shop-*.tgz
+      - name: "Ejecutar test de humo"
+        run: |
+          cd dist/juice-shop_*
+          npm start &
+          cd ../..
+          chmod +x test/smoke/smoke-test.sh
+          test/smoke/smoke-test.sh http://localhost:3000
+
+  test-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repositorio"
+        uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f #v3: v3.4.0
+      - name: "Ejecutar test de humo en Docker"
+        run: docker-compose -f docker-compose.test.yml up --exit-code-from sut

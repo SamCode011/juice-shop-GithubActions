@@ -2,7 +2,6 @@ name: "Flujo CD"
 run-name: "Flujo CD"
 on:
   workflow_dispatch:
-   aws-region: ${{ vars.AWS_REGION }}
     inputs:
       cloud:
         description: "Proveedor Cloud"

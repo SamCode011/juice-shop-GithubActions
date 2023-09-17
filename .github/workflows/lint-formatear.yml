@@ -1,0 +1,31 @@
+name: Automatizar Formateo de archivos con Lint
+run-name: Lint automático
+on: [push]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: "Checkout repositorio"
+      uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f #v3: v3.4.0
+    - name: "Configurar Node 18"
+      uses: actions/setup-node@64ed1c7eab4cce3362f8c340dee64e5eaeef8f7c #v3: v3.6.0
+      with:
+        node-version: 18
+    - name: "Instalar CLI de Angular"
+      run: npm install -g @angular/cli@$ANGULAR_CLI_VERSION
+    - name: "Instalar dependencias"
+      run: |
+        npm install --ignore-scripts
+        cd frontend
+        npm install --ignore-scripts --legacy-peer-deps
+    - name: "Arreglar archivos lint"
+      run: 'npm run lint:fix'
+    - uses: stefanzweifel/git-auto-commit-action@3ea6ae190baf489ba007f7c92608f33ce20ef04a #v4 #v4.16.0
+      with:
+        commit_message: "Auto-fix linting issues"
+        branch: ${{ github.head_ref }}
+        commit_options: '--signoff'
+        commit_user_name: JuiceShopBot
+        commit_user_email: 61591748+JuiceShopBot@users.noreply.github.com
+        commit_author: JuiceShopBot <61591748+JuiceShopBot@users.noreply.github.com>
